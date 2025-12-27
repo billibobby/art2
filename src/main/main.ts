@@ -4,8 +4,24 @@ import { fileURLToPath } from 'url'
 import Store from 'electron-store'
 import dotenv from 'dotenv'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import type { ChatMessage, WindowState } from '../types/electron'
+import type { ChatMessage, WindowState, Settings } from '../types/electron'
 import { IPC_CHANNELS } from '../types/ipc-channels'
+import { validateImageData } from '../utils/validation'
+import { validateChatHistory, validateWindowState, validateSettings, ChatMessageSchema, SettingsSchema } from '../types/schemas'
+import { 
+  MAX_CHAT_HISTORY_SIZE, 
+  ALLOWED_STORE_KEYS, 
+  WINDOW_STATE_SAVE_DEBOUNCE_MS,
+  MIN_WINDOW_WIDTH,
+  MIN_WINDOW_HEIGHT,
+  DEFAULT_WINDOW_WIDTH,
+  DEFAULT_WINDOW_HEIGHT,
+  WINDOW_DISPLAY_MARGIN,
+  MAX_DIMENSION_MULTIPLIER,
+  ALLOWED_IMAGE_TYPES
+} from '../config/constants'
+import { wrapIpcHandler, wrapIpcBooleanHandler } from './utils/ipc-wrapper'
+import { StorageError, WindowControlError, ImageAnalysisError, ApiKeyMissingError } from '../types/errors'
 
 // Load environment variables
 dotenv.config()
@@ -31,7 +47,10 @@ if (process.env.GEMINI_API_KEY) {
 let mainWindow: BrowserWindow | null = null
 
 // Chat history size limit
-const MAX_CHAT_HISTORY_SIZE = 1000
+const MAX_CHAT_HISTORY_SIZE_CONST = MAX_CHAT_HISTORY_SIZE
+
+// Allowed store keys for security
+const ALLOWED_STORE_KEYS_CONST = ALLOWED_STORE_KEYS
 
 // Interfaces imported from centralized types
 
@@ -55,19 +74,20 @@ const saveWindowState = () => {
       }
       store.set('windowState', windowState)
     }
-  }, 500)
+  }, WINDOW_STATE_SAVE_DEBOUNCE_MS)
 }
 
 const createWindow = () => {
   // Load saved window state
   const defaultState: WindowState = {
-    width: 1200,
-    height: 800,
+    width: DEFAULT_WINDOW_WIDTH,
+    height: DEFAULT_WINDOW_HEIGHT,
     isMaximized: false,
     x: 0,
     y: 0
   }
-  const savedState = store.get('windowState', defaultState) as WindowState
+  const rawSavedState = store.get('windowState', defaultState)
+  const savedState = validateWindowState(rawSavedState) || defaultState
   
   // Validate window state against current display bounds
   const primaryDisplay = screen.getPrimaryDisplay()
@@ -79,17 +99,17 @@ const createWindow = () => {
                      savedState.y + savedState.height < displayY ||
                      savedState.y > displayY + displayHeight
   
-  const hasInvalidDimensions = savedState.width < 800 || savedState.height < 600 ||
-                              savedState.width > displayWidth * 2 || savedState.height > displayHeight * 2
+  const hasInvalidDimensions = savedState.width < MIN_WINDOW_WIDTH || savedState.height < MIN_WINDOW_HEIGHT ||
+                              savedState.width > displayWidth * MAX_DIMENSION_MULTIPLIER || savedState.height > displayHeight * MAX_DIMENSION_MULTIPLIER
   
   // Use validated state or fall back to centered default
   let windowState: WindowState
   if (isOffScreen || hasInvalidDimensions) {
     windowState = {
-      width: Math.min(1200, displayWidth - 100),
-      height: Math.min(800, displayHeight - 100),
-      x: Math.floor((displayWidth - Math.min(1200, displayWidth - 100)) / 2) + displayX,
-      y: Math.floor((displayHeight - Math.min(800, displayHeight - 100)) / 2) + displayY,
+      width: Math.min(DEFAULT_WINDOW_WIDTH, displayWidth - WINDOW_DISPLAY_MARGIN),
+      height: Math.min(DEFAULT_WINDOW_HEIGHT, displayHeight - WINDOW_DISPLAY_MARGIN),
+      x: Math.floor((displayWidth - Math.min(DEFAULT_WINDOW_WIDTH, displayWidth - WINDOW_DISPLAY_MARGIN)) / 2) + displayX,
+      y: Math.floor((displayHeight - Math.min(DEFAULT_WINDOW_HEIGHT, displayHeight - WINDOW_DISPLAY_MARGIN)) / 2) + displayY,
       isMaximized: savedState.isMaximized
     }
   } else {
@@ -102,8 +122,8 @@ const createWindow = () => {
     y: windowState.y,
     width: windowState.width,
     height: windowState.height,
-    minWidth: 800,
-    minHeight: 600,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#1e1e1e',
@@ -135,15 +155,23 @@ const createWindow = () => {
   })
 
   // Window state persistence event listeners
-  mainWindow.on('resize', saveWindowState)
-  mainWindow.on('move', saveWindowState)
+  mainWindow.on('resize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) saveWindowState()
+  })
+  mainWindow.on('move', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) saveWindowState()
+  })
   mainWindow.on('maximize', () => {
-    saveWindowState()
-    mainWindow?.webContents.send(IPC_CHANNELS.WINDOW_MAXIMIZE_CHANGED, mainWindow.isMaximized())
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      saveWindowState()
+      mainWindow.webContents.send(IPC_CHANNELS.WINDOW_MAXIMIZE_CHANGED, mainWindow.isMaximized())
+    }
   })
   mainWindow.on('unmaximize', () => {
-    saveWindowState()
-    mainWindow?.webContents.send(IPC_CHANNELS.WINDOW_MAXIMIZE_CHANGED, mainWindow.isMaximized())
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      saveWindowState()
+      mainWindow.webContents.send(IPC_CHANNELS.WINDOW_MAXIMIZE_CHANGED, mainWindow.isMaximized())
+    }
   })
 
   mainWindow.on('closed', () => {
@@ -162,9 +190,9 @@ const analyzeImage = async (imageBase64: string, mimeType: string, prompt: strin
       return { success: false, error: 'Missing required parameters: imageBase64, mimeType, or prompt' }
     }
 
-    // Validate supported MIME types
-    const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
-    if (!supportedTypes.includes(mimeType)) {
+    // Validate supported MIME types (defense-in-depth - redundant validation after IPC handler check)
+    const supportedTypes = ALLOWED_IMAGE_TYPES
+    if (!supportedTypes.includes(mimeType as any)) {
       return { success: false, error: `Unsupported image type: ${mimeType}` }
     }
 
@@ -192,10 +220,8 @@ const analyzeImage = async (imageBase64: string, mimeType: string, prompt: strin
 app.whenReady().then(() => {
   // Check API key on startup
   if (!process.env.GEMINI_API_KEY) {
-    dialog.showErrorBox(
-      'Configuration Error', 
-      'GEMINI_API_KEY not found in .env file. Please add your Google AI API key to continue.'
-    )
+    const error = new ApiKeyMissingError('GEMINI_API_KEY not found in .env file. Please add your Google AI API key to continue.')
+    dialog.showErrorBox('Configuration Error', error.message)
   }
 
   createWindow()
@@ -207,6 +233,13 @@ app.whenReady().then(() => {
   })
 })
 
+app.on('before-quit', () => {
+  if (saveWindowStateTimeout) {
+    clearTimeout(saveWindowStateTimeout)
+    saveWindowStateTimeout = null
+  }
+})
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
@@ -215,31 +248,30 @@ app.on('window-all-closed', () => {
 
 // IPC handlers for renderer communication
 
-// Store operation handlers
-ipcMain.handle(IPC_CHANNELS.GET_STORE_VALUE, (_, key: string) => {
-  try {
-    return store.get(key)
-  } catch (error) {
-    console.error('Error getting store value:', error)
-    return null
-  }
-})
+// Specific store getter methods
+ipcMain.handle(IPC_CHANNELS.GET_SETTINGS, wrapIpcHandler(async () => {
+  const rawData = store.get('settings', {})
+  return validateSettings(rawData)
+}, StorageError))
 
-ipcMain.handle(IPC_CHANNELS.SET_STORE_VALUE, (_, key: string, value: any) => {
-  try {
-    store.set(key, value)
-    return true
-  } catch (error) {
-    console.error('Error setting store value:', error)
+ipcMain.handle(IPC_CHANNELS.SET_SETTINGS, wrapIpcBooleanHandler(async (_, value: Settings) => {
+  // Validate settings before persisting
+  const validation = SettingsSchema.safeParse(value)
+  if (!validation.success) {
+    console.error('Settings validation failed:', validation.error)
     return false
   }
-})
+  
+  store.set('settings', validation.data)
+  return true
+}, StorageError))
+
+ipcMain.handle(IPC_CHANNELS.GET_WINDOW_STATE, wrapIpcHandler(async () => {
+  const rawData = store.get('windowState')
+  return validateWindowState(rawData)
+}, StorageError))
 
 // API access handlers
-ipcMain.handle(IPC_CHANNELS.GET_GEMINI_API_KEY, () => {
-  return process.env.GEMINI_API_KEY
-})
-
 ipcMain.handle(IPC_CHANNELS.GET_AI_STATUS, () => {
   return {
     isInitialized: model !== null,
@@ -249,45 +281,28 @@ ipcMain.handle(IPC_CHANNELS.GET_AI_STATUS, () => {
 })
 
 // Window control handlers
-ipcMain.handle(IPC_CHANNELS.WINDOW_MINIMIZE, () => {
-  try {
-    mainWindow?.minimize()
-  } catch (error) {
-    console.error('Error minimizing window:', error)
-  }
-})
+ipcMain.handle(IPC_CHANNELS.WINDOW_MINIMIZE, wrapIpcHandler(async () => {
+  mainWindow?.minimize()
+}, WindowControlError))
 
-ipcMain.handle(IPC_CHANNELS.WINDOW_MAXIMIZE, () => {
-  try {
-    if (mainWindow?.isMaximized()) {
-      mainWindow.unmaximize()
-    } else {
-      mainWindow?.maximize()
-    }
-  } catch (error) {
-    console.error('Error toggling maximize:', error)
+ipcMain.handle(IPC_CHANNELS.WINDOW_MAXIMIZE, wrapIpcHandler(async () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow.unmaximize()
+  } else {
+    mainWindow?.maximize()
   }
-})
+}, WindowControlError))
 
-ipcMain.handle(IPC_CHANNELS.WINDOW_CLOSE, () => {
-  try {
-    mainWindow?.close()
-  } catch (error) {
-    console.error('Error closing window:', error)
-  }
-})
+ipcMain.handle(IPC_CHANNELS.WINDOW_CLOSE, wrapIpcHandler(async () => {
+  mainWindow?.close()
+}, WindowControlError))
 
-ipcMain.handle(IPC_CHANNELS.WINDOW_IS_MAXIMIZED, () => {
-  try {
-    return mainWindow?.isMaximized() || false
-  } catch (error) {
-    console.error('Error checking maximize state:', error)
-    return false
-  }
-})
+ipcMain.handle(IPC_CHANNELS.WINDOW_IS_MAXIMIZED, wrapIpcHandler(async () => {
+  return mainWindow?.isMaximized() || false
+}, WindowControlError))
 
 // AI Analysis handler
-ipcMain.handle(IPC_CHANNELS.ANALYZE_IMAGE, async (_, imageBase64: string, mimeType: string, prompt: string) => {
+ipcMain.handle(IPC_CHANNELS.ANALYZE_IMAGE, wrapIpcHandler(async (_, imageBase64: string, mimeType: string, prompt: string) => {
   // Validate IPC parameters
   if (typeof imageBase64 !== 'string' || typeof mimeType !== 'string' || typeof prompt !== 'string') {
     return { success: false, error: 'Invalid arguments: imageBase64, mimeType, and prompt must all be strings' }
@@ -297,55 +312,53 @@ ipcMain.handle(IPC_CHANNELS.ANALYZE_IMAGE, async (_, imageBase64: string, mimeTy
     return { success: false, error: 'Invalid arguments: imageBase64, mimeType, and prompt cannot be empty' }
   }
   
-  return await analyzeImage(imageBase64, mimeType, prompt)
-})
+  // Add server-side validation for image data
+  const validation = validateImageData(imageBase64, mimeType)
+  if (!validation.isValid) {
+    return { success: false, error: validation.error }
+  }
+  
+  // Normalize MIME type to lowercase after validation
+  const normalizedMimeType = mimeType.toLowerCase()
+  
+  return await analyzeImage(imageBase64, normalizedMimeType, prompt)
+}, ImageAnalysisError))
 
 // Chat history handlers
-ipcMain.handle(IPC_CHANNELS.GET_CHAT_HISTORY, () => {
-  try {
-    return store.get('chatHistory', []) as ChatMessage[]
-  } catch (error) {
-    console.error('Error getting chat history:', error)
-    return []
-  }
-})
+ipcMain.handle(IPC_CHANNELS.GET_CHAT_HISTORY, wrapIpcHandler(async () => {
+  const rawData = store.get('chatHistory', [])
+  return validateChatHistory(rawData)
+}, StorageError))
 
-ipcMain.handle(IPC_CHANNELS.SAVE_MESSAGE, (_, message: ChatMessage) => {
-  try {
-    const history = store.get('chatHistory', []) as ChatMessage[]
-    history.push(message)
-    
-    // Limit chat history size to prevent unbounded growth
-    if (history.length > MAX_CHAT_HISTORY_SIZE) {
-      history.splice(0, history.length - MAX_CHAT_HISTORY_SIZE)
-    }
-    
-    store.set('chatHistory', history)
-    return true
-  } catch (error) {
-    console.error('Error saving message:', error)
+ipcMain.handle(IPC_CHANNELS.SAVE_MESSAGE, wrapIpcBooleanHandler(async (_, message: ChatMessage) => {
+  // Validate incoming message before saving
+  const messageValidation = ChatMessageSchema.safeParse(message)
+  if (!messageValidation.success) {
+    console.error('Message validation failed:', messageValidation.error)
     return false
   }
-})
 
-ipcMain.handle(IPC_CHANNELS.CLEAR_HISTORY, () => {
-  try {
-    store.set('chatHistory', [])
-    return true
-  } catch (error) {
-    console.error('Error clearing history:', error)
-    return false
+  const rawHistory = store.get('chatHistory', [])
+  const history = validateChatHistory(rawHistory)
+  history.push(messageValidation.data)
+  
+  // Limit chat history size to prevent unbounded growth
+  if (history.length > MAX_CHAT_HISTORY_SIZE_CONST) {
+    history.splice(0, history.length - MAX_CHAT_HISTORY_SIZE_CONST)
   }
-})
+  
+  store.set('chatHistory', history)
+  return true
+}, StorageError))
 
-ipcMain.handle(IPC_CHANNELS.DELETE_MESSAGE, (_, messageId: string) => {
-  try {
-    const history = store.get('chatHistory', []) as ChatMessage[]
-    const filteredHistory = history.filter(msg => msg.id !== messageId)
-    store.set('chatHistory', filteredHistory)
-    return true
-  } catch (error) {
-    console.error('Error deleting message:', error)
-    return false
-  }
-})
+ipcMain.handle(IPC_CHANNELS.CLEAR_HISTORY, wrapIpcBooleanHandler(async () => {
+  store.set('chatHistory', [])
+  return true
+}, StorageError))
+
+ipcMain.handle(IPC_CHANNELS.DELETE_MESSAGE, wrapIpcBooleanHandler(async (_, messageId: string) => {
+  const history = validateChatHistory(store.get('chatHistory', []))
+  const filteredHistory = history.filter(msg => msg.id !== messageId)
+  store.set('chatHistory', filteredHistory)
+  return true
+}, StorageError))

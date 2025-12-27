@@ -14,6 +14,7 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Load chat history and check AI status on mount
   useEffect(() => {
@@ -55,7 +56,11 @@ function App() {
     }
 
     setError(null)
+    setSaveError(null)
     setIsLoading(true)
+    
+    // Declare updatedMessages in outer scope to avoid ReferenceError in catch block
+    let updatedMessages: ChatMessage[] | null = null
 
     try {
       // Create user message
@@ -63,19 +68,22 @@ function App() {
         id: generateMessageId(),
         role: 'user',
         content: prompt,
-        imageData,
-        imageMimeType: mimeType,
         timestamp: Date.now()
       }
 
       // Add user message to current messages
-      const updatedMessages = [...currentMessages, userMessage]
+      updatedMessages = [...currentMessages, userMessage]
       setCurrentMessages(updatedMessages)
 
-      // Save user message to history
-      await window.electronAPI.saveMessage(userMessage)
+      // Save user message to history and check return value
+      const userSaveSuccess = await window.electronAPI.saveMessage(userMessage)
+      if (!userSaveSuccess) {
+        setSaveError('Failed to save message')
+        setIsLoading(false)
+        return
+      }
       
-      // Update chat history state immediately after saving user message
+      // Update chat history state only after successful save
       setChatHistory(updatedMessages)
 
       // Call AI analysis
@@ -98,11 +106,14 @@ function App() {
         const finalMessages = [...updatedMessages, assistantMessage]
         setCurrentMessages(finalMessages)
 
-        // Save assistant message to history
-        await window.electronAPI.saveMessage(assistantMessage)
-
-        // Update chat history state
-        setChatHistory(finalMessages)
+        // Save assistant message to history and check return value
+        const assistantSaveSuccess = await window.electronAPI.saveMessage(assistantMessage)
+        if (!assistantSaveSuccess) {
+          setSaveError('Response received but not saved')
+        } else {
+          // Update chat history state only after successful save
+          setChatHistory(finalMessages)
+        }
       } else {
         // Handle AI analysis error
         const errorMessage: ChatMessage = {
@@ -114,17 +125,40 @@ function App() {
 
         const finalMessages = [...updatedMessages, errorMessage]
         setCurrentMessages(finalMessages)
-        await window.electronAPI.saveMessage(errorMessage)
-        setChatHistory(finalMessages)
+        
+        // Save error message to history and check return value
+        const errorSaveSuccess = await window.electronAPI.saveMessage(errorMessage)
+        if (!errorSaveSuccess) {
+          console.error('Failed to save error message')
+          setSaveError('Failed to save error message')
+        } else {
+          setChatHistory(finalMessages)
+        }
       }
     } catch (err) {
       console.error('Failed to process message:', err)
       setError('Failed to process your request. Please try again.')
       
-      // Ensure chat history stays in sync when analysis fails
-      setChatHistory(updatedMessages)
+      // Ensure chat history stays in sync when analysis fails, only if updatedMessages was set
+      if (updatedMessages) {
+        setChatHistory(updatedMessages)
+      }
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleRetrySave = async () => {
+    // Find the last unsaved message and retry saving it
+    const lastMessage = currentMessages[currentMessages.length - 1]
+    if (lastMessage) {
+      const saveSuccess = await window.electronAPI.saveMessage(lastMessage)
+      if (saveSuccess) {
+        setSaveError(null)
+        setChatHistory([...currentMessages])
+      } else {
+        setSaveError('Retry failed. Please try again.')
+      }
     }
   }
 
@@ -194,6 +228,31 @@ function App() {
                     <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
                   </svg>
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Save Error Banner */}
+          {saveError && (
+            <div className="bg-orange-900 bg-opacity-20 border-b border-orange-500 px-4 py-2">
+              <div className="flex items-center justify-between">
+                <span className="text-orange-400 text-sm">{saveError}</span>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handleRetrySave}
+                    className="text-orange-400 hover:text-orange-300 text-sm underline transition-colors"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    onClick={() => setSaveError(null)}
+                    className="text-orange-400 hover:text-orange-300 transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           )}

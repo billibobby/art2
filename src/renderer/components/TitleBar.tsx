@@ -12,10 +12,13 @@ const TitleBar: React.FC = () => {
     
     getInitialState()
 
-    // Listen for maximize state changes
-    window.electronAPI.onWindowMaximizeChanged((maximized) => {
+    // Listen for maximize state changes and store cleanup function
+    const cleanup = window.electronAPI.onWindowMaximizeChanged((maximized) => {
       setIsMaximized(maximized)
     })
+
+    // Return cleanup function to remove listener on unmount
+    return cleanup
   }, [])
 
   const handleMinimize = () => {

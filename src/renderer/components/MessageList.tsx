@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import { ChatMessage } from '../../types/electron'
 import { formatTimestamp } from '../utils/helpers'
+import { MESSAGE_MAX_WIDTH_PERCENT, LOADING_DOT_DELAY_1, LOADING_DOT_DELAY_2 } from '../../config/constants'
 
 interface MessageListProps {
   messages: ChatMessage[]
@@ -26,7 +27,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, isLoading }) => {
         key={message.id}
         className={`message flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}
       >
-        <div className={`max-w-[70%] ${isUser ? 'ml-auto' : 'mr-auto'}`}>
+        <div className={`max-w-[${MESSAGE_MAX_WIDTH_PERCENT}%] ${isUser ? 'ml-auto' : 'mr-auto'}`}>
           {/* Avatar for assistant messages */}
           {!isUser && (
             <div className="flex items-start space-x-3">
@@ -39,17 +40,11 @@ const MessageList: React.FC<MessageListProps> = ({ messages, isLoading }) => {
                     ? 'bg-accent-blue text-white' 
                     : 'bg-dark-sidebar text-white border border-dark-border'
                 }`}>
-                  {/* Image for user messages */}
-                  {isUser && message.imageData && (
-                    <div className="mb-3">
-                      <img
-                        src={`data:${message.imageMimeType || 'image/jpeg'};base64,${message.imageData}`}
-                        alt="Uploaded artwork"
-                        className="max-w-full h-auto rounded cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => {
-                          // TODO: Open image in modal
-                        }}
-                      />
+                  {/* Image placeholder for user messages */}
+                  {isUser && (
+                    <div className="mb-3 flex items-center space-x-2 text-blue-100">
+                      <span className="text-lg">🖼️</span>
+                      <span className="text-sm italic">[Image was attached]</span>
                     </div>
                   )}
                   
@@ -78,17 +73,11 @@ const MessageList: React.FC<MessageListProps> = ({ messages, isLoading }) => {
                     ? 'bg-accent-blue text-white' 
                     : 'bg-dark-sidebar text-white border border-dark-border'
                 }`}>
-                  {/* Image for user messages */}
-                  {message.imageData && (
-                    <div className="mb-3">
-                      <img
-                        src={`data:${message.imageMimeType || 'image/jpeg'};base64,${message.imageData}`}
-                        alt="Uploaded artwork"
-                        className="max-w-full h-auto rounded cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => {
-                          // TODO: Open image in modal
-                        }}
-                      />
+                  {/* Image placeholder for user messages */}
+                  {isUser && (
+                    <div className="mb-3 flex items-center space-x-2 text-blue-100">
+                      <span className="text-lg">🖼️</span>
+                      <span className="text-sm italic">[Image was attached]</span>
                     </div>
                   )}
                   
@@ -117,7 +106,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages, isLoading }) => {
 
   const LoadingIndicator = () => (
     <div className="flex justify-start mb-4">
-      <div className="max-w-[70%] mr-auto">
+      <div className={`max-w-[${MESSAGE_MAX_WIDTH_PERCENT}%] mr-auto`}>
         <div className="flex items-start space-x-3">
           <div className="w-8 h-8 bg-accent-green rounded-full flex items-center justify-center flex-shrink-0">
             <span className="text-white text-sm">🤖</span>
@@ -125,8 +114,8 @@ const MessageList: React.FC<MessageListProps> = ({ messages, isLoading }) => {
           <div className="bg-dark-sidebar border border-dark-border rounded-lg px-4 py-3">
             <div className="flex items-center space-x-1">
               <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: `${LOADING_DOT_DELAY_1}s` }}></div>
+              <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: `${LOADING_DOT_DELAY_2}s` }}></div>
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ChatMessage, AnalysisResult, AiStatus, ElectronAPI } from '../types/electron'
+import type { ChatMessage, AnalysisResult, AiStatus, ElectronAPI, Settings } from '../types/electron'
 import { IPC_CHANNELS } from '../types/ipc-channels'
 
 /**
@@ -12,31 +12,25 @@ import { IPC_CHANNELS } from '../types/ipc-channels'
  * Use window.electronAPI in your React components to access these methods.
  */
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Store operations
+  // Store operations - specific getters only
   /**
-   * Get a value from electron-store
-   * @param key - The key to retrieve
-   * @returns Promise resolving to the stored value or null if not found
+   * Get application settings
+   * @returns Promise resolving to settings object
    */
-  getStoreValue: (key: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_STORE_VALUE, key),
+  getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GET_SETTINGS),
   
   /**
-   * Set a value in electron-store
-   * @param key - The key to store under
-   * @param value - The value to store
+   * Set application settings
+   * @param value - Settings object to save
    * @returns Promise resolving to true if successful
    */
-  setStoreValue: (key: string, value: any) => ipcRenderer.invoke(IPC_CHANNELS.SET_STORE_VALUE, key, value),
+  setSettings: (value: Settings) => ipcRenderer.invoke(IPC_CHANNELS.SET_SETTINGS, value),
   
-  // API key access (development only for security)
   /**
-   * Get the Gemini API key (development mode only)
-   * @returns Promise resolving to the API key or undefined
-   * @deprecated Consider using getAiStatus() instead for production
+   * Get window state
+   * @returns Promise resolving to WindowState object or undefined
    */
-  ...(process.env.NODE_ENV === 'development' && {
-    getGeminiApiKey: () => ipcRenderer.invoke(IPC_CHANNELS.GET_GEMINI_API_KEY)
-  }),
+  getWindowState: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WINDOW_STATE),
   
   /**
    * Get AI initialization status
@@ -72,9 +66,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /**
    * Listen for window maximize state changes
    * @param callback - Function called when maximize state changes
+   * @returns Cleanup function to remove the listener
    */
   onWindowMaximizeChanged: (callback: (isMaximized: boolean) => void) => {
-    ipcRenderer.on(IPC_CHANNELS.WINDOW_MAXIMIZE_CHANGED, (_: any, isMaximized: boolean) => callback(isMaximized))
+    const listener = (_: any, isMaximized: boolean) => callback(isMaximized)
+    ipcRenderer.on(IPC_CHANNELS.WINDOW_MAXIMIZE_CHANGED, listener)
+    // Return cleanup function
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_MAXIMIZE_CHANGED, listener)
+    }
   },
   
   // AI Analysis

@@ -2,12 +2,12 @@
 // Centralized definition to prevent typos and improve refactoring safety
 
 export const IPC_CHANNELS = {
-  // Store operations
-  GET_STORE_VALUE: 'get-store-value',
-  SET_STORE_VALUE: 'set-store-value',
+  // Store operations - specific getters only
+  GET_SETTINGS: 'get-settings',
+  SET_SETTINGS: 'set-settings',
+  GET_WINDOW_STATE: 'get-window-state',
   
   // API access
-  GET_GEMINI_API_KEY: 'get-gemini-api-key',
   GET_AI_STATUS: 'get-ai-status',
   
   // Window controls

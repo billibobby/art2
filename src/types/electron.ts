@@ -5,8 +5,6 @@ export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-  imageData?: string
-  imageMimeType?: string
   timestamp: number
 }
 
@@ -33,11 +31,21 @@ export interface WindowState {
   isMaximized: boolean
 }
 
+// Settings interface
+export interface Settings {
+  // Placeholder for future application settings
+  // Add theme preferences, UI state, or other configuration here
+}
+
+// Store value union type
+export type StoreValue = ChatMessage[] | WindowState | Settings | undefined
+
 // Main Electron API interface exposed to renderer
 export interface ElectronAPI {
-  // Store operations
-  getStoreValue: (key: string) => Promise<any>
-  setStoreValue: (key: string, value: any) => Promise<boolean>
+  // Store operations - specific getters only
+  getSettings: () => Promise<Settings>
+  setSettings: (value: Settings) => Promise<boolean>
+  getWindowState: () => Promise<WindowState | undefined>
   getAiStatus: () => Promise<AiStatus>
   
   // Window controls
@@ -45,7 +53,7 @@ export interface ElectronAPI {
   maximizeWindow: () => Promise<void>
   closeWindow: () => Promise<void>
   isWindowMaximized: () => Promise<boolean>
-  onWindowMaximizeChanged: (callback: (isMaximized: boolean) => void) => void
+  onWindowMaximizeChanged: (callback: (isMaximized: boolean) => void) => () => void
   
   // AI Analysis
   analyzeImage: (imageBase64: string, mimeType: string, prompt: string) => Promise<AnalysisResult>

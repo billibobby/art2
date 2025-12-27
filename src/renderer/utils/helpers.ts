@@ -1,4 +1,14 @@
 // Utility functions for the renderer process
+import { 
+  ONE_MINUTE_MS, 
+  ONE_HOUR_MS, 
+  ONE_DAY_MS, 
+  ONE_WEEK_MS,
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_SIZE_DISPLAY,
+  BYTES_PER_KB,
+  ALLOWED_IMAGE_TYPES
+} from '../config/constants'
 
 /**
  * Generate unique message ID using crypto.randomUUID or timestamp fallback
@@ -20,25 +30,25 @@ export const formatTimestamp = (timestamp: number): string => {
   const date = new Date(timestamp)
 
   // Less than 1 minute
-  if (diff < 60 * 1000) {
+  if (diff < ONE_MINUTE_MS) {
     return 'Just now'
   }
 
   // Less than 1 hour
-  if (diff < 60 * 60 * 1000) {
-    const minutes = Math.floor(diff / (60 * 1000))
+  if (diff < ONE_HOUR_MS) {
+    const minutes = Math.floor(diff / ONE_MINUTE_MS)
     return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
   }
 
   // Less than 24 hours
-  if (diff < 24 * 60 * 60 * 1000) {
-    const hours = Math.floor(diff / (60 * 60 * 1000))
+  if (diff < ONE_DAY_MS) {
+    const hours = Math.floor(diff / ONE_HOUR_MS)
     return `${hours} hour${hours === 1 ? '' : 's'} ago`
   }
 
   // Less than 7 days
-  if (diff < 7 * 24 * 60 * 60 * 1000) {
-    const days = Math.floor(diff / (24 * 60 * 60 * 1000))
+  if (diff < ONE_WEEK_MS) {
+    const days = Math.floor(diff / ONE_DAY_MS)
     return `${days} day${days === 1 ? '' : 's'} ago`
   }
 
@@ -78,7 +88,7 @@ export const truncateText = (text: string, maxLength: number): string => {
 export const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 Bytes'
 
-  const k = 1024
+  const k = BYTES_PER_KB
   const sizes = ['Bytes', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
 
@@ -90,20 +100,18 @@ export const formatFileSize = (bytes: number): string => {
  */
 export const validateImageFile = (file: File): { isValid: boolean; error?: string } => {
   // Check file type
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
-  if (!allowedTypes.includes(file.type)) {
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type as any)) {
     return {
       isValid: false,
       error: 'Invalid file type. Please select a JPEG, PNG, GIF, or WebP image.'
     }
   }
 
-  // Check file size (10MB limit)
-  const maxSize = 10 * 1024 * 1024 // 10MB in bytes
-  if (file.size > maxSize) {
+  // Check file size
+  if (file.size > MAX_FILE_SIZE_BYTES) {
     return {
       isValid: false,
-      error: 'File size too large. Please select an image smaller than 10MB.'
+      error: `File size too large. Please select an image smaller than ${MAX_FILE_SIZE_DISPLAY}.`
     }
   }
 

@@ -1,6 +1,7 @@
 import React from 'react'
 import { ChatMessage } from '../../types/electron'
 import { formatTimestamp, truncateText } from '../utils/helpers'
+import { ONE_DAY_MS, ONE_WEEK_MS, MESSAGE_TRUNCATE_LENGTH } from '../../config/constants'
 
 interface SidebarProps {
   isCollapsed: boolean
@@ -28,8 +29,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const groupMessagesByDate = (messages: ChatMessage[]) => {
     const now = Date.now()
     const today = new Date(now).setHours(0, 0, 0, 0)
-    const yesterday = today - 24 * 60 * 60 * 1000
-    const lastWeek = today - 7 * 24 * 60 * 60 * 1000
+    const yesterday = today - ONE_DAY_MS
+    const lastWeek = today - ONE_WEEK_MS
 
     const groups = {
       today: [] as ChatMessage[],
@@ -74,19 +75,13 @@ const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => onSelectMessage?.(message.id)}
               className="flex items-center p-2 mx-2 rounded cursor-pointer hover:bg-dark-hover transition-colors duration-150"
             >
-              {message.imageData && (
-                <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0 mr-3">
-                  <img
-                    src={`data:${message.imageMimeType || 'image/jpeg'};base64,${message.imageData}`}
-                    alt="Message thumbnail"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
+              <div className="w-8 h-8 rounded bg-accent-blue flex items-center justify-center flex-shrink-0 mr-3">
+                <span className="text-white text-sm">🎨</span>
+              </div>
               {!isCollapsed && (
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white truncate">
-                    {truncateText(message.content, 50)}
+                    {truncateText(message.content, MESSAGE_TRUNCATE_LENGTH)}
                   </p>
                   <p className="text-xs text-gray-400">
                     {formatTimestamp(message.timestamp)}

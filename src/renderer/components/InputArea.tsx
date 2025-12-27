@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import ImageUpload from './ImageUpload'
+import { TEXTAREA_LINE_HEIGHT_PX, TEXTAREA_MAX_LINES, TEXTAREA_MIN_HEIGHT_PX } from '../../config/constants'
 
 interface InputAreaProps {
   onSubmit: (prompt: string, imageData?: string, mimeType?: string) => void
@@ -17,7 +18,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSubmit, disabled = false }) => 
     if (textarea) {
       textarea.style.height = 'auto'
       const scrollHeight = textarea.scrollHeight
-      const maxHeight = 5 * 24 // 5 lines * 24px line height
+      const maxHeight = TEXTAREA_MAX_LINES * TEXTAREA_LINE_HEIGHT_PX
       textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`
     }
   }
@@ -135,7 +136,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSubmit, disabled = false }) => 
               disabled={disabled}
               className="w-full px-4 py-3 bg-dark-bg border border-dark-border rounded-lg text-white placeholder-gray-400 resize-none focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
               rows={1}
-              style={{ minHeight: '48px', lineHeight: '24px' }}
+              style={{ minHeight: `${TEXTAREA_MIN_HEIGHT_PX}px`, lineHeight: `${TEXTAREA_LINE_HEIGHT_PX}px` }}
             />
             <div className="absolute bottom-2 right-2 text-xs text-gray-500">
               {prompt.length > 0 && `${prompt.length} chars`}

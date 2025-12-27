@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { validateImageFile, fileToBase64, formatFileSize } from '../utils/helpers'
+import { MAX_FILE_SIZE_DISPLAY } from '../../config/constants'
 
 interface ImageUploadProps {
   onImageSelect: (imageData: string, mimeType: string) => void
@@ -17,6 +18,15 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onImageSelect, disabled = fal
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Cleanup object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (selectedImage) {
+        URL.revokeObjectURL(selectedImage.preview)
+      }
+    }
+  }, [selectedImage])
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
@@ -67,6 +77,11 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onImageSelect, disabled = fal
     }
 
     try {
+      // Revoke previous object URL if it exists
+      if (selectedImage) {
+        URL.revokeObjectURL(selectedImage.preview)
+      }
+
       const base64 = await fileToBase64(file)
       const preview = URL.createObjectURL(file)
       
@@ -178,7 +193,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onImageSelect, disabled = fal
             Drag & drop or click to select • JPEG, PNG, GIF, WebP
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            Max file size: 10MB
+            Max file size: {MAX_FILE_SIZE_DISPLAY}
           </p>
         </div>
       </div>
